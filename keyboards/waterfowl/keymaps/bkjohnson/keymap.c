@@ -15,6 +15,7 @@
 */
 
 #include QMK_KEYBOARD_H
+#include "digitizer.h"
 #include "features/layer_lock.h"
 
 // Defines names for use in layer keycodes and the keymap
@@ -28,13 +29,23 @@ enum layer_names {
     _NUM,
     _SYM,
     _FUNC,
+    _DIGITIZER,
 };
 
 enum custom_keycodes {
   LLOCK = QK_KB_0,
   MACRO_SETUP_EDITOR,
   MACRO_THUMBS_UP,
+  DG_LEFT,
+  DG_RIGHT,
+  DG_UP,
+  DG_DOWN,
 };
+
+static float dig_x = 0.5;
+static float dig_y = 0.5;
+static float x_bound = 1.0;
+static float y_bound = 1.0;
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
@@ -115,7 +126,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  */
 [_MOUSE] = LAYOUT(
 	QK_BOOT,    KC_NO,		TD(2),		TD(3),	    KC_NO,		KC_TRNS,	KC_TRNS,	KC_TRNS,	KC_TRNS,	KC_TRNS,
-	KC_LGUI,	KC_LALT,	KC_LCTL,	KC_LSFT,	KC_NO,		KC_NO,		KC_MS_LEFT, KC_MS_DOWN,	KC_MS_UP,	KC_MS_RIGHT,
+	KC_LGUI,	KC_LALT,	KC_LCTL,	KC_LSFT,	TT(_DIGITIZER),      KC_NO,	    KC_MS_LEFT, KC_MS_DOWN,	KC_MS_UP,	KC_MS_RIGHT,
 	KC_NO,		KC_NO,		KC_NO,		TD(1),	KC_NO,		KC_NO,		KC_WH_L,	KC_WH_D,	KC_WH_U,	KC_WH_R,
 	KC_NO,		KC_NO,      KC_NO,      KC_NO,		KC_NO,	    KC_NO,		KC_MS_BTN2,	KC_MS_BTN1,	KC_MS_BTN3, KC_NO
 ),
@@ -219,7 +230,56 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
  	KC_F10,		KC_F1,		KC_F2,		KC_F3,		KC_PAUS,	KC_NO,		TD(1),	KC_NO,		KC_NO,		KC_NO,
  	KC_NO,		KC_APP,     KC_SPC,     KC_TAB,		KC_NO,	    KC_NO,		KC_NO,	    KC_NO,	    KC_NO,      KC_NO
  ),
+
+/* DIGITIZER
+ *
+ * ,----------------------------------.                      ,----------------------------------.
+ * |      |      |      |      |      |                      |      |      |      |      |      |
+ * |------+------+------+------+------|                      |------+------+------+------+------|
+ * | SUPR | ALT  | CTRL | SHIFT| XXXX |                      |      | M <- | M v  |  M ^ | M -> |
+ * |------+------+------+------+------|  ,-----.    ,-----.  |------+------+------+------+------|
+ * |      |      |      |      |      |  |     |    |     |  |      | W <- | W v  |  W ^ |W ->  |
+ * `----------------------------------'  `-----'    `-----'  `----------------------------------'
+ *          ,-----.   ,--------------------.            ,--------------------.   ,-----.
+ *          |     |   |     |       | XXXX |            | RIGHT | LEFT | MID |   |     |
+ *          `-----'   `--------------------'            `--------------------'   `-----'
+ */
+[_DIGITIZER] = LAYOUT(
+	QK_BOOT,    KC_NO,		TD(2),		TD(3),	    KC_NO,		KC_TRNS,	DG_LEFT,	DG_DOWN,	DG_UP,	DG_RIGHT,
+	KC_LGUI,	KC_LALT,	KC_LCTL,	KC_LSFT,	KC_NO,      KC_NO,	    DG_LEFT,   DG_DOWN,	DG_UP,	    DG_RIGHT,
+	KC_NO,		KC_NO,		KC_NO,		TD(1),	    KC_NO,		KC_NO,		KC_NO,	    KC_NO,	    KC_NO,	    KC_NO,
+	DB_TOGG,	KC_NO,      KC_NO,      KC_NO,		KC_NO,	    KC_NO,		KC_MS_BTN2,	KC_MS_BTN1,	KC_MS_BTN3, KC_NO
+),
 };
+
+layer_state_t layer_state_set_user(layer_state_t layer_state) {
+  switch(get_highest_layer(layer_state)) {
+    case _DIGITIZER:
+      // Reset to the center each time we go into the layer
+      dig_y = 0.5;
+      dig_x = 0.5;
+      y_bound = 1.0;
+      x_bound = 1.0;
+      break;
+  }
+
+  return layer_state;
+}
+
+void move_pointer(float x, float y) {
+    digitizer_t digitizer_state = digitizer_get_state();
+    digitizer_state.contacts[0].type = STYLUS;
+    digitizer_state.contacts[0].x = x * DIGITIZER_RESOLUTION_X;
+    digitizer_state.contacts[0].y = y * DIGITIZER_RESOLUTION_Y;
+    digitizer_state.contacts[0].amplitude = 10;
+    digitizer_state.contacts[0].confidence = 1;
+    digitizer_set_state(digitizer_state);
+
+    // TODO: I want to "lift" the contact right after we move
+    // so that the logs don't get spammed
+    digitizer_state.contacts[0].amplitude = 0;
+    digitizer_set_state(digitizer_state);
+}
 
 bool process_record_user(uint16_t keycode, keyrecord_t* record) {
   if (!process_layer_lock(keycode, record, LLOCK)) { return false; }
@@ -237,6 +297,32 @@ bool process_record_user(uint16_t keycode, keyrecord_t* record) {
         SEND_STRING("+:+1:\n");
       }
       break;
+    case DG_LEFT:
+      if (record->event.pressed) {
+        dig_x *= 0.5;
+        x_bound *= 0.5;
+        move_pointer(dig_x, dig_y);
+      }
+      break;
+     case DG_DOWN:
+      if (record->event.pressed) {
+        dig_y = dig_y + (y_bound - dig_y)/2;
+        move_pointer(dig_x, dig_y);
+      }
+      break;
+    case DG_UP:
+      if (record->event.pressed) {
+        dig_y *= 0.5;
+        y_bound *= 0.5;
+        move_pointer(dig_x, dig_y);
+      }
+      break;
+    case DG_RIGHT:
+      if (record->event.pressed) {
+        dig_x = dig_x + (x_bound - dig_x)/2;
+        move_pointer(dig_x, dig_y);
+      }
+      break;
   }
 
   return true;
@@ -249,6 +335,7 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [_EXTRA] =  { ENCODER_CCW_CW(G(KC_TAB), RSG(KC_TAB)), ENCODER_CCW_CW(KC_VOLD, KC_VOLU)  },
     [_NAV] =    { },
     [_MOUSE] =  { ENCODER_CCW_CW(_______, _______), ENCODER_CCW_CW(_______, _______), ENCODER_CCW_CW(KC_MS_WH_LEFT, KC_MS_WH_RIGHT), ENCODER_CCW_CW(KC_MS_WH_UP, KC_MS_WH_DOWN) },
+    [_DIGITIZER] ={ },
     [_BUTTON] = { },
     [_MEDIA] =  { ENCODER_CCW_CW(_______, _______), ENCODER_CCW_CW(_______, _______), ENCODER_CCW_CW(KC_LEFT, KC_RIGHT), ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
     [_NUM] =    { },

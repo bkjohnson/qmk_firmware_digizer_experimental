@@ -96,6 +96,9 @@ bool oled_task_kb(void) {
            case 8:
                oled_write_P(PSTR("FUNCTION\n\n\n\n"), false);
                break;
+           case 9:
+               oled_write_P(PSTR("DIGITIZER\n\n\n\n"), false);
+               break;
            default:
                oled_write_ln_P(PSTR("Undefined"), false);
        }
